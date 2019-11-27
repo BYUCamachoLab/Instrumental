@@ -133,7 +133,7 @@ class ClientMessenger(Messenger):
     def __init__(self, host, port):
         super(ClientMessenger, self).__init__()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.settimeout(2.0)
+        self.sock.settimeout(20)
         self.sock.connect((host, port))
         self.host = host
         self.curr_id = 0
@@ -326,12 +326,14 @@ class ServerSession(Session):
         return list_instruments(), FAKE_LOCK
 
     def handle_attr(self, request):
+        log.debug('Entering ServerSession.handle_attr()')
         obj_id = request['obj_id']
         entry = self.obj_table[obj_id]
         with entry.lock:
             return getattr(entry.obj, request['attr']), entry.lock
 
     def handle_setattr(self, request):
+        log.debug('Entering ServerSession.handle_setattr()')
         obj_id = request['obj_id']
         entry = self.obj_table[obj_id]
         with entry.lock:
@@ -339,6 +341,7 @@ class ServerSession(Session):
         return None, FAKE_LOCK
 
     def handle_item(self, request):
+        log.debug('Entering ServerSession.handle_item()')
         obj_id = request['obj_id']
         entry = self.obj_table[obj_id]
         with entry.lock:
@@ -352,6 +355,7 @@ class ServerSession(Session):
         return None, FAKE_LOCK
 
     def handle_call(self, request):
+        log.debug('Entering ServerSession.handle_call()')
         obj_id = request['obj_id']
         entry = self.obj_table[obj_id]
         with entry.lock:
@@ -462,21 +466,26 @@ class RemoteObject(object):
         return self._reprname
 
     def __getattr__(self, name):
+        print('Entering RemoteObject.__getattr__()')
         return self._session.get_obj_attr(self._obj_id, name)
 
     def __setattr__(self, name, value):
+        print('Entering RemoteObject.__setattr__()')
         if name in self._local_attrs:
             self.__dict__[name] = value
         else:
             self._session.set_obj_attr(self._obj_id, name, value)
 
     def __getitem__(self, key):
+        print('Entering RemoteObject.__getitem__()')
         return self._session.get_obj_item(self._obj_id, key)
 
     def __setitem__(self, key, value):
+        print('Entering RemoteObject.__setitem__()')
         self._session.set_obj_item(self._obj_id, key, value)
 
     def __call__(self, *args, **kwargs):
+        print('Entering RemoteObject.__call__()')
         return self._session.get_obj_call(self._obj_id, *args, **kwargs)
 
     def __getstate__(self):
