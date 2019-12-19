@@ -9,7 +9,7 @@ import atexit
 import socket
 import struct
 import threading
-import pickle
+import dill as pickle
 
 from . import instrument, list_instruments, Instrument
 from .. import conf
@@ -33,8 +33,10 @@ STRUCT = struct.Struct('!BQ')
 
 class FakeLock(object):
     def __enter__(self):
+        log.debug('Entering FakeLock.__enter__()')
         pass
     def __exit__(self, type, value, traceback):
+        log.debug('Entering FakeLock.__exit__()')
         pass
 FAKE_LOCK = FakeLock()  # Only need one
 
@@ -50,9 +52,11 @@ class RemoteTimeoutError(RemoteError):
 class Messenger(object):
     """Low-level messenger used to send and receive discrete, numbered byte-level messages"""
     def __init__(self):
+        log.debug('Entering Messenger.__init__()')
         self.leftover = None
 
     def _send_message(self, message, id):
+        log.debug('Entering Messenger._send_message()')
         encoded = self.encode(message, id, len(message))
         try:
             self.sock.sendall(encoded)
@@ -62,6 +66,7 @@ class Messenger(object):
             raise RemoteError("Socket error while sending message data: {}".format(str(e)))
 
     def _recv_message(self):
+        log.debug('Entering Messenger._recv_message()')
         if self.leftover:
             bytes_recd = len(self.leftover)
             chunks = [self.leftover]
@@ -105,15 +110,18 @@ class Messenger(object):
 
     @staticmethod
     def encode(message, id, length):
+        log.debug('Entering Messenger.encode()')
         return STRUCT.pack(id, length) + message
 
     @staticmethod
     def decode(message):
+        log.debug('Entering Messenger.decode()')
         id, length = STRUCT.unpack(message[:9])
         return message[9:], id, length
 
     @staticmethod
     def read_header(message):
+        log.debug('Entering Messenger.read_header()')
         id, length = STRUCT.unpack(message[:9])
         return id, length
 
@@ -122,15 +130,18 @@ class Session(object):
     """High-level session"""
     @staticmethod
     def serialize(obj):
+        log.debug('Entering Session.serialize()')
         return pickle.dumps(obj)
 
     @staticmethod
     def deserialize(data):
+        log.debug('Entering Session.deserialize()')
         return pickle.loads(data)
 
 
 class ClientMessenger(Messenger):
     def __init__(self, host, port):
+        log.debug('Entering ClientMessenger.__init__()')
         super(ClientMessenger, self).__init__()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.settimeout(20)
@@ -140,6 +151,7 @@ class ClientMessenger(Messenger):
 
     def make_request(self, request_bytes):
         """Send request bytes to the server, and return its response bytes"""
+        log.debug('Entering ClientMessenger.make_request()')
         id = self.curr_id
         self.curr_id = (self.curr_id + 1) % 256
         self._send_message(request_bytes, id)
@@ -151,11 +163,13 @@ class ClientMessenger(Messenger):
         return response_bytes
 
     def close(self):
+        log.debug('Entering ClientMessenger.close()')
         self.sock.close()
 
 
 class ClientSession(Session):
     def __init__(self, host, port, server):
+        log.debug('Entering ClientSession.__init__()')
         self.host = host
         self.port = port
         self.server = server
@@ -167,9 +181,11 @@ class ClientSession(Session):
             raise RemoteError("Socket error while connecting to host: {}".format(str(e)))
 
     def close(self):
+        log.debug('Entering ClientSession.close()')
         self.messenger.close()
 
     def request(self, **message_dict):
+        log.debug('Entering ClientSession.request()')
         log.debug('Sending request %r', message_dict)
         message = self.serialize(message_dict)
         response = self.messenger.make_request(message)
@@ -180,35 +196,42 @@ class ClientSession(Session):
         return response_obj
 
     def list_instruments(self):
+        log.debug('Entering ClientSession.list_instruments()')
         instr_list = self.request(command='list')
         for instr in instr_list:
             instr['server'] = self.server
         return instr_list
 
     def instrument(self, params):
+        log.debug('Entering ClientSession.instrument()')
         response = self.request(command='create', params=params)
         response._session = self
         return response
 
     def get_obj_attr(self, obj_id, attr):
+        log.debug('Entering ClientSession.get_obj_attr()')
         obj = self.request(command='attr', obj_id=obj_id, attr=attr)
         if isinstance(obj, RemoteObject):
             obj._session = self
         return obj
 
     def set_obj_attr(self, obj_id, attr, value):
+        log.debug('Entering ClientSession.set_obj_attr()')
         self.request(command='setattr', obj_id=obj_id, attr=attr, value=value)
 
     def get_obj_item(self, obj_id, key):
+        log.debug('Entering ClientSession.get_objt_item()')
         obj = self.request(command='item', obj_id=obj_id, key=key)
         if isinstance(obj, RemoteObject):
             obj._session = self
         return obj
 
     def set_obj_item(self, obj_id, key, value):
+        log.debug('Entering ClientSession.set_obj_item()')
         self.request(command='setitem', obj_id=obj_id, key=key, value=value)
 
     def get_obj_call(self, obj_id, *args, **kwargs):
+        log.debug('Entering ClientSession.get_obj_call()')
         obj = self.request(command='call', obj_id=obj_id, args=args, kwargs=kwargs)
         if isinstance(obj, RemoteObject):
             obj._session = self
@@ -218,12 +241,14 @@ class ClientSession(Session):
 class ServerMessenger(Messenger):
     """Server-side session representing a connection to a client"""
     def __init__(self, socket):
+        log.debug('Entering ServerMessenger.__init__()')
         super(ServerMessenger, self).__init__()
         self.sock = socket
         self.curr_id = None
 
     def listen(self):
         """Listen for an incoming byte message. Returns None if connection was closed"""
+        log.debug('Entering ServerMessenger.listen()')
         full_msg = self._recv_message()
         if full_msg:
             msg, id = full_msg
@@ -233,6 +258,7 @@ class ServerMessenger(Messenger):
 
     def respond(self, response_bytes):
         """Respond (in bytes) to a message received via listen()"""
+        log.debug('Entering ServerMessenger.respond()')
         if self.curr_id is None:
             raise Exception("Invalid message id. respond() must be used to respond to a "
                             "message received via listen()")
@@ -241,6 +267,7 @@ class ServerMessenger(Messenger):
 
 class ObjectEntry(object):
     def __init__(self, obj, remote_obj, lock, share):
+        log.debug('Entering ObjectEntry.__init__()')
         self.id = id(obj)
         self.obj = obj
         self.remote_obj = remote_obj
@@ -250,6 +277,7 @@ class ObjectEntry(object):
 
 class ServerSession(Session):
     def __init__(self, socket, shared_obj_table, table_lock):
+        log.debug('Entering ServerSession.__init__()')
         self.command_handler = {
             'create': self.handle_create,
             'list': self.handle_list,
@@ -267,6 +295,7 @@ class ServerSession(Session):
 
     def _get_shared_inst(self, params):
         """Get shared instrument if it exists, otherwise create it and add it to the table"""
+        log.debug('Entering ServerSession._get_shared_inst()')
         key = frozenset(params.items())
         with self.shared_table_lock:
             # Get or create instrument
@@ -287,6 +316,7 @@ class ServerSession(Session):
         return inst, lock
 
     def _close_shared_inst(self, entry):
+        log.debug('Entering ServerSession._close_shared_inst()')
         with entry.lock:
             entry.obj._server_refcount -= 1
             if entry.obj._server_refcount > 0:
@@ -304,6 +334,7 @@ class ServerSession(Session):
                 del self.shared_obj_table[key]
 
     def handle_create(self, request):
+        log.debug('Entering ServerSession.handle_create()')
         params = request['params']._dict.copy()
         params.pop('server')  # Needed to force instrument() to look locally
         share = params.pop('share', False)
@@ -322,6 +353,7 @@ class ServerSession(Session):
         return remote_obj, lock
 
     def handle_list(self, request):
+        log.debug('Entering ServerSession.handle_list()')
         # TODO: Handle locking of listed instruments
         return list_instruments(), FAKE_LOCK
 
@@ -348,6 +380,7 @@ class ServerSession(Session):
             return entry.obj[request['key']], entry.lock
 
     def handle_setitem(self, request):
+        log.debug('Entering ServerSession.handle_setitem()')
         obj_id = request['obj_id']
         entry = self.obj_table[obj_id]
         with entry.lock:
@@ -362,9 +395,11 @@ class ServerSession(Session):
             return entry.obj(*request['args'], **request['kwargs']), entry.lock
 
     def handle_none(self, request):
+        log.debug('Entering ServerSession.handle_none()')
         return Exception("Unknown command"), FAKE_LOCK
 
     def serialize(self, obj, lock):
+        log.debug('Entering ServerSession.serialize()')
         parent_serialize = super(ServerSession, self).serialize
 
         # Use RemoteObject if obj has one
@@ -381,6 +416,7 @@ class ServerSession(Session):
         return bytes
 
     def new_remote_obj(self, obj, lock):
+        log.debug('Entering ServerSession.new_remote_obj()')
         with lock:
             obj_id = id(obj)
             remote_obj = RemoteObject(obj_id, dir(obj), repr(obj))
@@ -389,6 +425,7 @@ class ServerSession(Session):
             return remote_obj
 
     def handle_requests(self):
+        log.debug('Entering ServerSession.handle_requests()')
         while True:
             message_bytes = self.messenger.listen()
             if message_bytes is None:
@@ -408,7 +445,11 @@ class ServerSession(Session):
                 lock = FAKE_LOCK
 
             log.info('Sending response %r', response)
-            self.messenger.respond(self.serialize(response, lock))
+            try:
+                self.messenger.respond(self.serialize(response, lock))
+            except Exception as e:
+                log.exception(e)
+
 
         # Clean up before we exit
         log.info('Cleaning up open objects')
@@ -427,6 +468,7 @@ class ServerSession(Session):
 
 class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
     def handle(self):
+        log.debug('Entering ThreadedTCPRequestHandler.handle()')
         log.info("Opening connection to client...")
         session = ServerSession(self.request, self.server.shared_obj_table, self.server.table_lock)
         session.handle_requests()
@@ -434,6 +476,7 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     def __init__(self, server_address):
+        log.debug('Entering ThreadedTCPServer.__init__()')
         socketserver.TCPServer.__init__(self, server_address, ThreadedTCPRequestHandler)
         self.shared_obj_table = {}
         self.table_lock = threading.RLock()
@@ -442,6 +485,7 @@ class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 class RemoteObject(object):
     def __init__(self, id, dirlist, reprname, session=None):
+        log.debug('Entering RemoteObject.__init__()')
         self.__dict__['_local_attrs'] = set(('_local_attrs',))
         self._local_setattr('_obj_id', id)
         self._local_setattr('_reprname', "<Remote {}>".format(reprname))
@@ -449,54 +493,62 @@ class RemoteObject(object):
         self._local_setattr('_dirlist', dirlist)
 
     def _local_setattr(self, name, value):
+        log.debug('Entering RemoteObject._local_setattr()')
         self.__dict__[name] = value
         self._local_attrs.add(name)
 
     def __enter__(self):
+        log.debug('Entering RemoteObject.__enter__()')
         return self.__getattr__('__enter__')()
 
     def __exit__(self, type, value, traceback):
+        log.debug('Entering RemoteObject.__exit__()')
         # Can't pickle a traceback object, so we don't send it, and hope for the best...
         return self.__getattr__('__exit__')(type, value, None)
 
     def __dir__(self):
+        log.debug('Entering RemoteObject._dirlist()')
         return self._dirlist
 
     def __repr__(self):
+        log.debug('Entering RemoteObject.__repr__()')
         return self._reprname
 
     def __getattr__(self, name):
-        print('Entering RemoteObject.__getattr__()')
+        log.debug('Entering RemoteObject.__getattr__()')
         return self._session.get_obj_attr(self._obj_id, name)
 
     def __setattr__(self, name, value):
-        print('Entering RemoteObject.__setattr__()')
+        log.debug('Entering RemoteObject.__setattr__()')
         if name in self._local_attrs:
             self.__dict__[name] = value
         else:
             self._session.set_obj_attr(self._obj_id, name, value)
 
     def __getitem__(self, key):
-        print('Entering RemoteObject.__getitem__()')
+        log.debug('Entering RemoteObject.__getitem__()')
         return self._session.get_obj_item(self._obj_id, key)
 
     def __setitem__(self, key, value):
-        print('Entering RemoteObject.__setitem__()')
+        log.debug('Entering RemoteObject.__setitem__()')
         self._session.set_obj_item(self._obj_id, key, value)
 
     def __call__(self, *args, **kwargs):
-        print('Entering RemoteObject.__call__()')
+        log.debug('Entering RemoteObject.__call__()')
         return self._session.get_obj_call(self._obj_id, *args, **kwargs)
 
     def __getstate__(self):
+        log.debug('Entering RemoteObject.__getstate__()')
         return {name: self.__dict__[name] for name in self._local_attrs}
 
     def __setstate__(self, state_dict):
+        log.debug('Entering RemoteObject.__setstate__()')
         self.__dict__.update(state_dict)
 
 
 class RemoteInstrument(RemoteObject, Instrument):
     def __new__(cls, *args, **kwds):
+        log.debug('Entering ServerSession.handle_attr()')
         log.info('Calling RemoteInstrument.__new__...')
         return RemoteObject.__new__(RemoteInstrument)
 
@@ -510,6 +562,7 @@ class RemoteInstrument(RemoteObject, Instrument):
 
 def client_session(server):
     """Get the session connected to `server`. Creates one if it doesn't exist yet."""
+    log.debug('Entering client_session()')
     if server in conf.servers:
         host = conf.servers[server]
     else:
